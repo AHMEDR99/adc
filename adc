@@ -1,0 +1,204 @@
+#include <stm32l432xx.h>
+static uint16_t Analog_buffer[1];
+ 
+ 
+ void dma_con()
+ {
+     /* DMA Circular mode configuration ADC -> DMA2_Stream0 (Channel 0) */
+    /* *************************************************************** */
+
+    /* Enable DMA clock in RCC */
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
+
+    /* Make sure that the DMA2_Stream3 is disabled */
+    if(DMA_CCR_EN == (DMA_CCR_EN & DMA1_Channel1->CCR))
+    {
+        /* DMA2_Stream3 is enabled, shall be disabled first */
+        DMA1_Channel1->CCR &= ~DMA_CCR_EN;
+
+        /* Wait until EN bit is cleared */
+        while(DMA_CCR_EN == (DMA_CCR_EN & DMA1_Channel1->CCR))
+        {
+            /* Do nothing until EN bit is cleared */
+        }
+    }
+    else
+    {
+        /* Do nothing, DMA2_Stream3 is not enabled */
+    }
+
+
+    /* Select the DMA  stream 3 channel 0 in CHSEL[2:0]    */
+		
+		
+		DMA1_Channel1->CCR|=DMA_CCR_HTIE;
+		DMA1_Channel1->CCR|=DMA_CCR_TCIE;
+		DMA1_Channel1->CCR|=DMA_CCR_TEIE;
+		
+    DMA1_CSELR->CSELR=~(DMA_CSELR_C1S);
+
+    /* Select stream priority very high */
+    DMA1_Channel1->CCR |= DMA_CCR_PL_1;
+
+    /* Select the data transfer direction peripheral(ADC)-to-memory */
+    DMA1_Channel1->CCR &= ~DMA_CCR_DIR;
+
+    /* Select memory and peripherals sizes 2 bytes*/
+    DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0;
+    DMA1_Channel1->CCR |= DMA_CCR_PSIZE_0;
+
+
+
+    /* Select memory incremented mode, peripheral shall has fixed address */
+    DMA1_Channel1->CCR |= DMA_CCR_MINC;
+
+    /* Select circular mode */
+    DMA1_Channel1->CCR |= DMA_CCR_CIRC;
+
+    /* Set peripheral address */
+    DMA1_Channel1->CPAR = (uint32_t)&ADC1->DR;
+
+    /* Set memory address */
+    DMA1_Channel1->CMAR = (uint32_t)Analog_buffer;
+
+    /* Set number of data items, each conversion 3 requests */
+    DMA1_Channel1->CNDTR = 1;  // 1 for now
+
+    /* Enable DMA2_Stream3 */
+    DMA1_Channel1->CCR |= DMA_CCR_EN;}
+void nvic_init()
+{
+
+    NVIC_SetPriority(DMA1_Channel1_IRQn, 1);
+    NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+}
+void adc_start()
+{
+ADC1->CR|=ADC_CR_ADSTART;
+}
+void activate_adc()
+{
+
+    //Activate adc
+//disable deep power down
+    ADC1->CR&=~ADC_CR_DEEPPWD;
+
+/* Enable ADC internal voltage regulator */
+
+    ADC1->CR|=ADC_CR_ADVREGEN;
+
+// delay 1 ms  Delay for ADC internal voltage regulator stabilization.
+for (int index = 0; index < 500000; index++);
+
+
+    ADC1->CR&=~ADC_CR_ADCALDIF; // calibration for single ended mode
+    ADC1->CR |=ADC_CR_ADCAL ; // calibrate the ADC
+
+// delay 1ms  for calibration
+for (int index = 0; index < 500000; index++);
+//enable ADC
+    ADC1->CR|=ADC_CR_ADEN;
+}
+
+void ADC_Config(void)
+{
+    /* GPIO Configuration for PA_5, PC_3 and PF_6 */
+    /* ****************************************** */
+
+    /* Enable port A, clocks */
+    RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN  ;
+
+    /* Select Analog mode */
+		GPIOA->MODER|=GPIO_MODER_MODER6;
+    
+
+
+
+    /* Select no pull-up, pull-down (reset state) */
+    GPIOA->PUPDR &= ~GPIO_PUPDR_PUPDR6;
+
+
+    /* ADC Configuration ADC1_IN5, ADC2_IN13, ADC3_IN4 */
+    /* *********************************************** */
+    /* ADC prescaler PCLK2 divided by 2 */
+    /* 12-bits Resolution */
+    /* Right alignment */
+
+    /* Enable ADC clocks */
+    RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
+		ADC1->IER|=ADC_IER_OVRIE;
+
+    //ckmode hckl/2
+    ADC1_COMMON->CCR&=~ADC_CCR_CKMODE;
+    ADC1_COMMON->CCR|=ADC_CCR_CKMODE_1;
+
+    //exten extsel
+    ADC1->CFGR&=~ ADC_CFGR_EXTEN;
+    ADC1->CFGR&=~ ADC_CFGR_EXTSEL;
+
+
+    //continues
+
+   ADC1->CFGR|=ADC_CFGR_CONT;
+
+    /* Set ADC group regular conversion data transfer  DMA unlimited*/
+
+    ADC1->CFGR|= ADC_CFGR_DMAEN;
+    ADC1->CFGR|= ADC_CFGR_DMACFG;
+    /* Set ADC group regular overrun behavior */
+    ADC1->CFGR |=ADC_CFGR_OVRMOD;
+
+
+    /// 3 conversions  for now I'll do just 1
+    ADC1->SQR1 &= ~ADC_SQR1_L;
+    ADC1->SQR1 |=0x1U<<ADC_SQR1_L_Pos ;
+
+    // RANk1  ADC1 ch 5
+
+    ADC1->SQR1 &=ADC_SQR1_SQ1;
+    ADC1->SQR1 |=(ADC_SQR1_SQ1_0 |ADC_SQR1_SQ1_1 |ADC_SQR1_SQ1_3);
+
+// sampling at max
+
+ADC1->SMPR2|=ADC_SMPR2_SMP11;
+
+
+
+ NVIC_SetPriority(DMA1_Channel1_IRQn, 1); 
+  NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+
+
+
+
+
+}
+
+
+void nothing()
+{}
+
+int main()
+{nvic_init();
+		RCC->AHB2ENR|=RCC_AHB2ENR_GPIOBEN;
+	GPIOB->MODER&=~GPIO_MODER_MODE3;
+ GPIOB->MODER|=GPIO_MODER_MODE3_0;
+	GPIOB->OSPEEDR|=GPIO_OSPEEDER_OSPEEDR3_0;
+	GPIOB->OTYPER&=~GPIO_OTYPER_OT3;
+	GPIOB->BSRR|=GPIO_BSRR_BS3;
+	dma_con();
+    ADC_Config();
+    activate_adc();
+	adc_start();
+	
+	
+	while (1){}
+    return 0;
+}
+
+ 
+  void DMA1_Channel1_IRQHandler()
+{
+nothing();
+}
+ 
